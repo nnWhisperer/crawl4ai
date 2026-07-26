@@ -1,0 +1,197 @@
+name: Sync upstream
+
+# Required: configure one provider API key in the actions-env environment:
+# OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY.
+# Optional: set the DEEP_AGENT_MODEL repository variable (provider:model).
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: https://github.com/unclecode/crawl4ai.git
+  UPSTREAM_BRANCH: main
+  FORK_BRANCH: crwl-remote
+  AUTOFIX_BRANCH: auto-fix-workflow
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    environment: actions-env
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the fork
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_REPOSITORY"
+
+      - name: Merge and push upstream changes
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+
+          echo "repair_base=$FORK_BRANCH" >> "$GITHUB_OUTPUT"
+          git fetch --no-tags origin "$FORK_BRANCH" "$AUTOFIX_BRANCH"
+          origin_fetch_status=$?
+          if [ "$origin_fetch_status" -ne 0 ]; then
+            echo "problem=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Fetching maintained fork branches failed with exit code $origin_fetch_status." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+          fetch_status=$?
+          if [ "$fetch_status" -ne 0 ]; then
+            echo "problem=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Fetching upstream failed with exit code $fetch_status." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git switch --force-create sync-crwl-remote "origin/$FORK_BRANCH"
+
+          if ! git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" HEAD; then
+            git merge --no-edit "upstream/$UPSTREAM_BRANCH"
+            merge_status=$?
+            if [ "$merge_status" -ne 0 ]; then
+              echo "problem=true" >> "$GITHUB_OUTPUT"
+              echo "reason=Merging upstream into $FORK_BRANCH has conflicts." >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          git push origin "HEAD:$FORK_BRANCH"
+          push_status=$?
+          if [ "$push_status" -ne 0 ]; then
+            echo "problem=true" >> "$GITHUB_OUTPUT"
+            echo "reason=The clean merge could not be pushed to $FORK_BRANCH (exit code $push_status)." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          fork_commit=$(git rev-parse HEAD)
+          echo "repair_base=$AUTOFIX_BRANCH" >> "$GITHUB_OUTPUT"
+          git switch --force-create sync-auto-fix "origin/$AUTOFIX_BRANCH"
+          git merge --no-edit "$fork_commit"
+          auto_merge_status=$?
+          if [ "$auto_merge_status" -ne 0 ]; then
+            echo "problem=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Merging $FORK_BRANCH into $AUTOFIX_BRANCH has conflicts." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git push origin "HEAD:$AUTOFIX_BRANCH"
+          auto_push_status=$?
+          if [ "$auto_push_status" -ne 0 ]; then
+            echo "problem=true" >> "$GITHUB_OUTPUT"
+            echo "reason=The synchronized result could not be pushed to $AUTOFIX_BRANCH (exit code $auto_push_status)." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "problem=false" >> "$GITHUB_OUTPUT"
+          echo "reason=Upstream was merged into $FORK_BRANCH, then $FORK_BRANCH was merged into $AUTOFIX_BRANCH." >> "$GITHUB_OUTPUT"
+
+      - name: Ask Deep Agents to repair the sync
+        id: deep-agent
+        if: steps.sync.outputs.problem == 'true'
+        continue-on-error: true
+        uses: langchain-ai/deepagents@8da0ccb139b8ccc4438a7522499a257a44f1cf19
+        with:
+          model: ${{ vars.DEEP_AGENT_MODEL || 'openai:gpt-5.6-sol' }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          google_api_key: ${{ secrets.GOOGLE_API_KEY }}
+          github_token: ${{ github.token }}
+          agent_name: upstream-sync-repair
+          enable_memory: "false"
+          max_turns: "40"
+          timeout: "30"
+          shell_allow_list: recommended,git,gh
+          prompt: |
+            Repair this repository's failed weekly upstream sync.
+
+            Upstream is https://github.com/unclecode/crawl4ai.git, branch main.
+            The maintained fork branch is crwl-remote. The default automation
+            branch is auto-fix-workflow and must remain a strict superset of
+            crwl-remote plus workflow-only changes.
+            The automated attempt reported:
+            ${{ steps.sync.outputs.reason }}
+
+            Inspect the repository and Git state. If a merge is in progress,
+            resolve every conflict while preserving intentional fork-specific
+            behavior and incorporating upstream changes. If no merge is in
+            progress, diagnose the failed fetch or push and prepare a clean
+            merge of upstream/main when possible. Run focused validation for
+            the files you change.
+
+            Before making changes, read
+            docs/codebase/remote-cli-requirements.md in full.
+            Treat every requirement in that document as an acceptance criterion
+            for the repair. Preserve the remote CLI behavior it specifies,
+            reconcile upstream changes with those requirements, and verify the
+            completed repair against the document before handing it back. If an
+            upstream change conflicts with a requirement, the requirement takes
+            precedence and the resolution should retain the fork-specific
+            implementation.
+
+            Do not push, create a pull request, rewrite history, or force-push.
+            Leave the working tree in a resolved, committable state for the
+            workflow to publish. Do not remove unrelated fork functionality.
+
+      - name: Publish Deep Agents repair
+        if: steps.sync.outputs.problem == 'true' && always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPAIR_BRANCH: automation/sync-upstream-${{ github.run_id }}
+          REPAIR_BASE: ${{ steps.sync.outputs.repair_base }}
+          SYNC_REASON: ${{ steps.sync.outputs.reason }}
+          AGENT_OUTCOME: ${{ steps.deep-agent.outcome }}
+        run: |
+          if git ls-files --unmerged | grep -q .; then
+            echo "::error::Deep Agents did not resolve every merge conflict."
+            exit 1
+          fi
+
+          git diff --check
+
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git add --all
+            git commit --no-edit
+          elif ! git diff --quiet || ! git diff --cached --quiet; then
+            git add --all
+            git commit -m "chore: repair upstream sync"
+          fi
+
+          if git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" HEAD; then
+            git push origin "HEAD:$REPAIR_BRANCH"
+          else
+            echo "::error::The repair does not contain upstream/$UPSTREAM_BRANCH."
+            exit 1
+          fi
+
+          gh pr create \
+            --base "$REPAIR_BASE" \
+            --head "$REPAIR_BRANCH" \
+            --title "chore: sync with upstream" \
+            --body "The weekly upstream sync needed repair.
+
+          **Detected problem:** ${SYNC_REASON}
+          **Deep Agents step:** ${AGENT_OUTCOME}
+
+          This PR was prepared by LangChain Deep Agents and requires review before merging."

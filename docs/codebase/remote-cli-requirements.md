@@ -57,6 +57,37 @@ Playwright, browsers, or other local crawling dependencies.
 - Keep the skill compatible with local `crwl` and a shell alias to
   `crwl-remote`.
 
+## Upstream synchronization workflow
+
+- Include a GitHub Actions workflow that runs weekly and supports manual
+  dispatch.
+- Synchronize the fork's `crwl-remote` branch with
+  `https://github.com/unclecode/crawl4ai.git` branch `main`.
+- Push a clean upstream merge directly to the fork's `crwl-remote` branch,
+  then merge `crwl-remote` into the default `auto-fix-workflow` branch.
+- Keep `auto-fix-workflow` a strict superset of `crwl-remote` containing only
+  workflow-specific changes beyond the maintained Crawl4AI branch.
+- Treat upstream fetch failures, merge conflicts, and push failures as sync
+  problems that require repair by LangChain Deep Agents.
+- Run the workflow in the `actions-env` GitHub Environment so it can access
+  environment-scoped model-provider secrets.
+- Allow the model to be selected with the `DEEP_AGENT_MODEL` repository
+  variable and default to `openai:gpt-5.6-sol`.
+- Before changing a failed sync, the Deep Agent must read this document in full
+  and treat every requirement in it as an acceptance criterion.
+- When upstream changes conflict with these requirements, preserve the
+  fork-specific remote CLI behavior required by this document.
+- Require the Deep Agent to run focused validation and verify its completed
+  repair against this document.
+- Do not allow the Deep Agent to push, create pull requests, rewrite history,
+  or force-push itself.
+- Publish a resolved agent repair on a dedicated branch as a pull request
+  against the branch whose synchronization failed for human review; never let
+  an agent repair write directly to either maintained branch.
+- Grant the workflow only the GitHub permissions it needs to update repository
+  contents and create pull requests, prevent overlapping sync runs, and pin
+  third-party actions to commit SHAs.
+
 ## Acceptance criteria
 
 - Unit and security suites pass without weakening existing security posture.
