@@ -81,12 +81,12 @@ crawl4ai-download-models = "crawl4ai.model_loader:main"
 crawl4ai-migrate = "crawl4ai.migrations:main"
 crawl4ai-setup = "crawl4ai.install:post_install"
 crawl4ai-doctor = "crawl4ai.install:doctor"
-crwl = "crwl:main"
+crwl = "crawl4ai.cli:main"
 crwl-remote = "crwl_remote:main"
 
 [tool.setuptools]
 packages = {find = {where = ["."], include = ["crawl4ai*"]}}
-py-modules = ["crwl", "crwl_remote"]
+py-modules = ["crwl_remote"]
 
 [tool.setuptools.package-data]
 crawl4ai = ["js_snippet/*.js", "crawlers/google_search/*.js"]

@@ -196,10 +196,10 @@ def _run_remote(args: list[str], api_url: str, api_token: Optional[str]) -> int:
             body = json.load(response)
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        print(f"Error: Docker API returned HTTP {exc.code}: {detail}", file=sys.stderr)
+        print(f"Error: Crawl4AI API returned HTTP {exc.code}: {detail}", file=sys.stderr)
         return 1
     except URLError as exc:
-        print(f"Error: Cannot connect to Docker API: {exc.reason}", file=sys.stderr)
+        print(f"Error: Cannot connect to Crawl4AI API: {exc.reason}", file=sys.stderr)
         return 1
 
     if not body.get("success", False):
@@ -219,18 +219,16 @@ def _run_remote(args: list[str], api_url: str, api_token: Optional[str]) -> int:
 
 def main() -> None:
     args = sys.argv[1:]
-    if args and args[0] == "remote":
-        args = args[1:]
     if args and args[0] == "config":
         raise SystemExit(_configure(args[1:]))
     api_url = _api_setting(args, "--api-url", "CRAWL4AI_API_URL")
     if any(arg in ("-h", "--help") for arg in args):
         print(
-            "Usage: crwl remote URL [OPTIONS]\n"
-            "       crwl remote config [--api-url URL --api-token TOKEN]\n\n"
+            "Usage: crwl-remote URL [OPTIONS]\n"
+            "       crwl-remote config [--api-url URL --api-token TOKEN]\n\n"
             "Use CRAWL4AI_API_URL and CRAWL4AI_API_TOKEN (or --api-url and\n"
             "--api-token) to crawl through a remote Crawl4AI API. Credentials\n"
-            "saved by `crwl remote config` are used as the fallback.\n\n"
+            "saved by `crwl-remote config` are used as the fallback.\n\n"
             "Remote options: -B/--browser-config, -C/--crawler-config,\n"
             "-b/--browser, -c/--crawler, -o/--output, -O/--output-file"
         )
@@ -244,7 +242,7 @@ def main() -> None:
             raise SystemExit(1)
 
     print(
-        "Error: API URL is required; run `crwl remote config`, set "
+        "Error: API URL is required; run `crwl-remote config`, set "
         "CRAWL4AI_API_URL, or use --api-url.",
         file=sys.stderr,
     )

@@ -3,7 +3,6 @@ import json
 from unittest.mock import patch
 
 import crwl_remote
-import crwl
 
 
 class FakeResponse(io.BytesIO):
@@ -78,16 +77,6 @@ def test_environment_overrides_saved_credentials(tmp_path, monkeypatch):
 
     assert crwl_remote._api_setting([], "--api-url", "CRAWL4AI_API_URL") == "http://environment"
     assert crwl_remote._api_setting([], "--api-token", "CRAWL4AI_API_TOKEN") == "environment-token"
-
-
-def test_crwl_remote_subcommand_uses_lightweight_client(monkeypatch):
-    called = []
-    monkeypatch.setattr("sys.argv", ["crwl", "remote", "https://example.com"])
-    monkeypatch.setattr(crwl_remote, "main", lambda: called.append(True))
-
-    crwl.main()
-
-    assert called == [True]
 
 
 def test_remote_failure_returns_nonzero(capsys):
